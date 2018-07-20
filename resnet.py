@@ -1,4 +1,5 @@
 import os
+import cv2
 import numpy
 import pickle
 import tensorflow as tf
@@ -114,6 +115,33 @@ def load_cifar_data(files):
     return all_data, numpy.array(onehot_labels)
 
 
+def input_augmation(images, pad=4):
+    IMAGE_SIZE = 32
+
+    pad_width = ((0, 0), (pad, pad), (pad, pad), (0, 0))
+    padded_images = numpy.pad(images, pad_width, mode='constant',
+                              constant_values=0)
+
+    augmated_images = numpy.zeros_like(images)
+    for image_index in range(len(images)):
+        x_offset = numpy.random.randint(0, pad * 2)
+        y_offset = numpy.random.randint(0, pad * 2)
+        cropped_image = padded_images[image_index][x_offset:
+                                                   x_offset + IMAGE_SIZE,
+                                                   y_offset:
+                                                   y_offset + IMAGE_SIZE, :]
+
+        if numpy.random.randint(2) == 0:
+            augmated_image = cv2.flip(cropped_image, 1)
+
+        else:
+            augmated_image = cropped_image
+
+        numpy.copyto(augmated_images[image_index], augmated_image)
+
+    return augmated_images
+
+
 def main():
     CIFAR_TRAIN_FILES = ['data_batch_1', 'data_batch_2', 'data_batch_3',
                          'data_batch_4', 'data_batch_5']
@@ -140,6 +168,7 @@ def main():
     # TODO: i'm not sure about how to split iteration\batch\epchos.
     for iteration in range(ITERATION_AMOUNT):
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
+        batch_x = input_augmation(batch_x)
         batch_y = train_y[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
 
         sess.run(resnet.train_optimizer,
