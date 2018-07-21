@@ -141,8 +141,28 @@ def input_augmation(images, pad=4):
 
     return augmated_images
 
+def format_data(data, labels):
+    CLASS_NUM = 10
+
+    all_data = numpy.concatenate(data, 0)
+    all_data = all_data.transpose(0, 2, 3, 1)
+    all_labels = numpy.concatenate(labels, 0)
+
+    onehot_labels = []
+    for label in all_labels:
+        onehot = numpy.zeros(CLASS_NUM)
+        onehot[label] = 1
+        onehot_labels.append(onehot)
+
+    return all_data, numpy.array(onehot_labels)
 
 def main():
+    (train_x, train_y), (test_x, test_y) = tf.keras.datasets.cifar10.load_data()
+
+    train_x, train_y = format_data(train_x, train_y)
+    test_x, test_y = format_data(test_x, test_y)
+
+
     CIFAR_TRAIN_FILES = ['data_batch_1', 'data_batch_2', 'data_batch_3',
                          'data_batch_4', 'data_batch_5']
     CIFAR_TEST_FILES = ['test_batch']
@@ -150,8 +170,8 @@ def main():
     ITERATION_AMOUNT = 64000
     CIFAR_BATCH_SIZE = 128
 
-    train_x, train_y = load_cifar_data(CIFAR_TRAIN_FILES)
-    test_x, test_y = load_cifar_data(CIFAR_TEST_FILES)
+    # train_x, train_y = load_cifar_data(CIFAR_TRAIN_FILES)
+    # test_x, test_y = load_cifar_data(CIFAR_TEST_FILES)
 
     # shuffle the data
     shuffled_indices = numpy.random.permutation(len(train_x))
