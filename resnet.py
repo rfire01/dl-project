@@ -144,17 +144,13 @@ def input_augmation(images, pad=4):
 def format_data(data, labels):
     CLASS_NUM = 10
 
-    all_data = numpy.concatenate(data, 0)
-    all_data = all_data.transpose(0, 2, 3, 1)
-    all_labels = numpy.concatenate(labels, 0)
-
     onehot_labels = []
-    for label in all_labels:
+    for label in labels:
         onehot = numpy.zeros(CLASS_NUM)
         onehot[label] = 1
         onehot_labels.append(onehot)
 
-    return all_data, numpy.array(onehot_labels)
+    return data, numpy.array(onehot_labels)
 
 def main():
     (train_x, train_y), (test_x, test_y) = tf.keras.datasets.cifar10.load_data()
