@@ -12,15 +12,24 @@ def conv(x, filter_shape, stride):
                         padding="SAME")
 
 
+def normalize_batch(x):
+    """Batch normalization for a 4-D tensor"""
+    mean, var = tf.nn.moments(x, axes=[0, 1, 2])
+    constant_size = x.get_shape().as_list()[3]
+    offset = tf.Variable(tf.zeros([constant_size]))
+    scale = tf.Variable(tf.ones([constant_size]))
+    batch_norm = tf.nn.batch_normalization(x, mean, var, offset, scale,
+                                           0.001)
+    return batch_norm
+
+
 def res_unit(x, filter_size, in_dimension, out_dimension, stride):
-    # TODO: should check how to do batch normalization correctly
-    prev_norm = tf.layers.batch_normalization(x)
+    prev_norm = normalize_batch(x)
     prev_out = tf.nn.relu(prev_norm)
 
     conv_1 = conv(prev_out, [filter_size, filter_size, in_dimension,
                              out_dimension], stride)
-    # TODO: should check how to do batch normalization correctly
-    norm_1 = tf.layers.batch_normalization(conv_1)
+    norm_1 = normalize_batch(conv_1)
     layer_1 = tf.nn.relu(norm_1)
 
     conv_2 = conv(layer_1, [filter_size, filter_size, out_dimension,
@@ -45,7 +54,8 @@ class cifar_resnet:
     LAYER2_DIMENSION = 32
     LAYER3_DIMENSION = 64
 
-    def __init__(self,n ):
+    def __init__(self, n):
+
         self.images = tf.placeholder(tf.float32, [None, 32, 32, 3])
         self.labels = tf.placeholder(tf.float32, [None, 10])
 
@@ -58,7 +68,7 @@ class cifar_resnet:
         level2 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
                           self.LAYER2_DIMENSION, 2)
 
-        for _ in range(n-1):
+        for _ in range(n - 1):
             level2 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
                               self.LAYER2_DIMENSION, 1)
 
@@ -69,50 +79,30 @@ class cifar_resnet:
             level3 = res_unit(level3, self.FILTER_SIZE, self.LAYER3_DIMENSION,
                               self.LAYER3_DIMENSION, 1)
 
-        norm = tf.layers.batch_normalization(level3)
-        conv_out = tf.nn.relu(norm)
+        normed = normalize_batch(level3)
+        conv_out = tf.nn.relu(normed)
         global_pool = tf.reduce_mean(conv_out, [1, 2])
 
         fc_w = tf.Variable(tf.truncated_normal([self.LAYER3_DIMENSION, 10],
-                                                   mean=0.0, stddev=1.0))
+                                               mean=0.0, stddev=1.0))
         b = tf.Variable(tf.zeros([10]))
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
-        loss = - tf.reduce_sum(self.labels + tf.log(self.output))
-        optimizer = tf.train.MomentumOptimizer(0.001, momentum=0.9)
+        loss = - tf.reduce_sum(self.labels * tf.log(self.output))
+        optimizer = tf.train.MomentumOptimizer(0.001, 0.9)
         self.train_optimizer = optimizer.minimize(loss)
 
 
-def load_cifar_data(files):
-    CHANNELS = 3
+def label_to_onehot(labels):
     CLASS_NUM = 10
-    IAMGE_SIZE = 32
-    BATCH_SIZE = 10000
-    CIFAR_FOLDER = 'cifar-10-batches-py'
-
-    data = []
-    labels = []
-
-    files_path = [os.path.join(CIFAR_FOLDER, file) for file in files]
-    for file in files_path:
-        with open(file, 'rb')as f:
-            imported_data = pickle.load(f, encoding='latin1')
-            extracted_data = imported_data['data']
-            data.append(extracted_data.reshape(BATCH_SIZE, CHANNELS,
-                                               IAMGE_SIZE, IAMGE_SIZE))
-            labels.append(numpy.array(imported_data['labels']))
-
-    all_data = numpy.concatenate(data, 0)
-    all_data = all_data.transpose(0, 2, 3, 1)
-    all_labels = numpy.concatenate(labels, 0)
 
     onehot_labels = []
-    for label in all_labels:
+    for label in labels:
         onehot = numpy.zeros(CLASS_NUM)
         onehot[label] = 1
         onehot_labels.append(onehot)
 
-    return all_data, numpy.array(onehot_labels)
+    return numpy.array(onehot_labels)
 
 
 def input_augmation(images, pad=4):
@@ -142,16 +132,37 @@ def input_augmation(images, pad=4):
     return augmated_images
 
 
-def main():
-    CIFAR_TRAIN_FILES = ['data_batch_1', 'data_batch_2', 'data_batch_3',
-                         'data_batch_4', 'data_batch_5']
-    CIFAR_TEST_FILES = ['test_batch']
+def calculate_accuracy(x, y, net, session):
+    max_size = 10000
 
+    total_acc = 0
+    split_amount = len(x) / max_size
+    for index in range(int(split_amount)):
+        batch_x = x[max_size * index: max_size * (index + 1)]
+        batch_y = y[max_size * index: max_size * (index + 1)]
+
+        pred_Y = session.run(net.output, {net.images: batch_x})
+        pred_Y = numpy.argmax(pred_Y, 1)
+
+        correct_num = 0
+        for i, j in zip(pred_Y, batch_y):
+            if i == numpy.argmax(j):
+                correct_num += 1
+
+        total_acc += 1.0 * correct_num / max_size
+
+    return total_acc / split_amount
+
+
+def main():
     ITERATION_AMOUNT = 64000
     CIFAR_BATCH_SIZE = 128
 
-    train_x, train_y = load_cifar_data(CIFAR_TRAIN_FILES)
-    test_x, test_y = load_cifar_data(CIFAR_TEST_FILES)
+    (train_x, train_y), \
+    (test_x, test_y) = tf.keras.datasets.cifar10.load_data()
+
+    train_y = label_to_onehot(train_y)
+    test_y = label_to_onehot(test_y)
 
     # shuffle the data
     shuffled_indices = numpy.random.permutation(len(train_x))
@@ -164,9 +175,12 @@ def main():
     sess.run(tf.global_variables_initializer())
 
     batch_counter = 0
+    epoch = 1
     # running 64k iteration, a batch at each iteration.
     # TODO: i'm not sure about how to split iteration\batch\epchos.
     for iteration in range(ITERATION_AMOUNT):
+        if iteration % 10 == 0:
+            print("iteration ", iteration)
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
         batch_x = input_augmation(batch_x)
         batch_y = train_y[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
@@ -174,26 +188,14 @@ def main():
         sess.run(resnet.train_optimizer,
                  {resnet.images: batch_x, resnet.labels: batch_y})
 
-
-        ## testing only 1 batch of test.
-        ## TODO: do a better test
-        batch_x = test_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
-        batch_y = test_y[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
-        pred_Y = sess.run(resnet.output, {resnet.images: batch_x})
-        pred_Y = numpy.argmax(pred_Y, 1)
-
-        correct_num = 0
-        for i, j in zip(pred_Y, batch_y):
-            if i == numpy.argmax(j):
-                correct_num += 1
-
-        print(1.0 * correct_num / 128.0)
-
-        ######################################
-
         batch_counter += CIFAR_BATCH_SIZE
         if batch_counter >= len(train_x):
             batch_counter = 0
+
+            print("epoch ", epoch)
+            test_acc = calculate_accuracy(test_x, test_y, resnet, sess)
+            print("test error - ", 1 - test_acc)
+            epoch +=1
 
 
 if __name__== "__main__":
