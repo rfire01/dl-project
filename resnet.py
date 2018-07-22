@@ -177,7 +177,6 @@ def main():
     batch_counter = 0
     epoch = 1
     # running 64k iteration, a batch at each iteration.
-    # TODO: i'm not sure about how to split iteration\batch\epchos.
     for iteration in range(ITERATION_AMOUNT):
         if iteration % 10 == 0:
             print("iteration ", iteration)
