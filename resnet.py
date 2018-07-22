@@ -88,9 +88,12 @@ class cifar_resnet:
         b = tf.Variable(tf.zeros([10]))
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
-        loss = - tf.reduce_sum(self.labels * tf.log(self.output))
-        optimizer = tf.train.MomentumOptimizer(0.001, 0.9)
-        self.train_optimizer = optimizer.minimize(loss)
+        with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
+            learning_rate = tf.get_variable(name='learning_rate', shape=())
+
+            loss = - tf.reduce_sum(self.labels * tf.log(self.output))
+            optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
+            self.train_optimizer = optimizer.minimize(loss)
 
 
 def label_to_onehot(labels):
@@ -176,8 +179,24 @@ def main():
 
     batch_counter = 0
     epoch = 1
+
+    with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
+        tf.get_variable(name='learning_rate', dtype=tf.float32, initializer=tf.constant(0.1))
+        sess.run(tf.global_variables_initializer())
+
     # running 64k iteration, a batch at each iteration.
     for iteration in range(ITERATION_AMOUNT):
+
+        # after 32k iterations decay the learning rate by dividing by 10
+        # TODO - change from 30 to 32k (30 is for testing)
+        if iteration == 30:
+            with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
+                rate = tf.get_variable('learning_rate', shape=())
+                new_rate = rate / 10
+                print('setting new learning rate from ', rate, " to ", new_rate)
+                assignment = rate.assign(new_rate)
+                sess.run(assignment)
+
         if iteration % 10 == 0:
             print("iteration ", iteration)
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
