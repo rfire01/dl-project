@@ -23,7 +23,7 @@ def normalize_batch(x):
     return batch_norm
 
 
-def res_unit(x, filter_size, in_dimension, out_dimension, stride):
+def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
     prev_norm = normalize_batch(x)
     prev_out = tf.nn.relu(prev_norm)
 
@@ -45,7 +45,11 @@ def res_unit(x, filter_size, in_dimension, out_dimension, stride):
     else:
         x_padded = x
 
-    return tf.add(conv_2, x_padded)
+    if enable:
+        return tf.add(conv_2, x_padded)
+
+    else:
+        return conv_2
 
 
 class cifar_resnet:
@@ -54,7 +58,7 @@ class cifar_resnet:
     LAYER2_DIMENSION = 32
     LAYER3_DIMENSION = 64
 
-    def __init__(self, n):
+    def __init__(self, n, enable=True):
 
         self.images = tf.placeholder(tf.float32, [None, 32, 32, 3])
         self.labels = tf.placeholder(tf.float32, [None, 10])
@@ -63,21 +67,21 @@ class cifar_resnet:
 
         for _ in range(n):
             level1 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                              self.LAYER1_DIMENSION, 1)
+                              self.LAYER1_DIMENSION, 1, enable)
 
         level2 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                          self.LAYER2_DIMENSION, 2)
+                          self.LAYER2_DIMENSION, 2, enable)
 
         for _ in range(n - 1):
             level2 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                              self.LAYER2_DIMENSION, 1)
+                              self.LAYER2_DIMENSION, 1, enable)
 
         level3 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                          self.LAYER3_DIMENSION, 2)
+                          self.LAYER3_DIMENSION, 2, enable)
 
         for _ in range(n - 1):
             level3 = res_unit(level3, self.FILTER_SIZE, self.LAYER3_DIMENSION,
-                              self.LAYER3_DIMENSION, 1)
+                              self.LAYER3_DIMENSION, 1, enable)
 
         normed = normalize_batch(level3)
         conv_out = tf.nn.relu(normed)
@@ -88,9 +92,9 @@ class cifar_resnet:
         b = tf.Variable(tf.zeros([10]))
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
-        loss = - tf.reduce_sum(self.labels * tf.log(self.output))
+        self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
         optimizer = tf.train.MomentumOptimizer(0.001, 0.9)
-        self.train_optimizer = optimizer.minimize(loss)
+        self.train_optimizer = optimizer.minimize(self.loss)
 
 
 def label_to_onehot(labels):
@@ -133,7 +137,7 @@ def input_augmation(images, pad=4):
 
 
 def calculate_accuracy(x, y, net, session):
-    max_size = 10000
+    max_size = 100
 
     total_acc = 0
     split_amount = len(x) / max_size
@@ -192,8 +196,12 @@ def main():
             batch_counter = 0
 
             print("epoch ", epoch)
+            train_loss = sess.run(resnet.loss,
+                                  {resnet.images: batch_x,
+                                   resnet.labels: batch_y})
             test_acc = calculate_accuracy(test_x, test_y, resnet, sess)
             print("test error - ", 1 - test_acc)
+            print("train loss - ", train_loss)
             epoch +=1
 
 
