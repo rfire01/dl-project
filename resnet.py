@@ -57,8 +57,14 @@ class cifar_resnet:
     LAYER1_DIMENSION = 16
     LAYER2_DIMENSION = 32
     LAYER3_DIMENSION = 64
+    CHECKPOINTS = [32000, 48000]
+    CHECKPOINT_LEARNING_RATE = [0.01, 0.001, 0.0001]
 
     def __init__(self, n, enable=True):
+        self.step = tf.Variable(initial_value=0, trainable=False)
+        self.learning_rate = tf.train.piecewise_constant(self.step,
+                                                         self.CHECKPOINTS,
+                                                         self.CHECKPOINT_LEARNING_RATE)
 
         self.images = tf.placeholder(tf.float32, [None, 32, 32, 3])
         self.labels = tf.placeholder(tf.float32, [None, 10])
@@ -93,8 +99,9 @@ class cifar_resnet:
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
         self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
-        optimizer = tf.train.MomentumOptimizer(0.001, 0.9)
-        self.train_optimizer = optimizer.minimize(self.loss)
+        optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9)
+        self.train_optimizer = optimizer.minimize(self.loss,
+                                                  global_step=self.step)
 
 
 def label_to_onehot(labels):
