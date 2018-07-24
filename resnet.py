@@ -7,7 +7,7 @@ import tensorflow as tf
 
 def conv(x, filter_shape, stride):
     filters = tf.Variable(tf.truncated_normal(filter_shape,
-                                               mean=0.0, stddev=1.0))
+                                              mean=0.0, stddev=1.0))
     return tf.nn.conv2d(x, filter=filters, strides=[1, stride, stride, 1],
                         padding="SAME")
 
@@ -36,7 +36,6 @@ def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
                             out_dimension], 1)
 
     if in_dimension != out_dimension:
-        # TODO: check the right way for size reduction
         size_reduction = tf.nn.avg_pool(x, ksize=[1, 2, 2, 1],
                                         strides=[1, 2, 2, 1], padding='VALID')
         pad = (out_dimension - in_dimension) // 2
@@ -57,7 +56,7 @@ class cifar_resnet:
     LAYER1_DIMENSION = 16
     LAYER2_DIMENSION = 32
     LAYER3_DIMENSION = 64
-    CHECKPOINTS = [32000, 48000]
+    CHECKPOINTS = [20000, 48000]
     CHECKPOINT_LEARNING_RATE = [0.01, 0.001, 0.0001]
 
     def __init__(self, n, enable=True):
@@ -93,9 +92,15 @@ class cifar_resnet:
         conv_out = tf.nn.relu(normed)
         global_pool = tf.reduce_mean(conv_out, [1, 2])
 
-        fc_w = tf.Variable(tf.truncated_normal([self.LAYER3_DIMENSION, 10],
-                                               mean=0.0, stddev=1.0))
-        b = tf.Variable(tf.zeros([10]))
+        w_regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
+        fc_w = tf.get_variable(name="w_out", shape=[self.LAYER3_DIMENSION, 10],
+                               initializer=tf.uniform_unit_scaling_initializer(factor=1.0),
+                               regularizer=w_regularize)
+
+        b_regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
+        b = tf.get_variable(name="b_out", shape=[10],
+                            initializer=tf.zeros_initializer(),
+                            regularizer=b_regularize)
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
         self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
@@ -143,10 +148,11 @@ def input_augmation(images, pad=4):
     return augmated_images
 
 
-def calculate_accuracy(x, y, net, session):
+def evaluate(x, y, net, session):
     max_size = 100
 
     total_acc = 0
+    total_loss = 0
     split_amount = len(x) / max_size
     for index in range(int(split_amount)):
         batch_x = x[max_size * index: max_size * (index + 1)]
@@ -162,7 +168,10 @@ def calculate_accuracy(x, y, net, session):
 
         total_acc += 1.0 * correct_num / max_size
 
-    return total_acc / split_amount
+        loss = session.run(net.loss, {net.images: batch_x,
+                                      net.labels: batch_y})
+
+    return total_acc / split_amount, loss
 
 
 def main():
@@ -189,7 +198,7 @@ def main():
     epoch = 1
     # running 64k iteration, a batch at each iteration.
     for iteration in range(ITERATION_AMOUNT):
-        if iteration % 10 == 0:
+        if iteration % 100 == 0:
             print("iteration ", iteration)
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
         batch_x = input_augmation(batch_x)
@@ -203,14 +212,11 @@ def main():
             batch_counter = 0
 
             print("epoch ", epoch)
-            train_loss = sess.run(resnet.loss,
-                                  {resnet.images: batch_x,
-                                   resnet.labels: batch_y})
-            test_acc = calculate_accuracy(test_x, test_y, resnet, sess)
+            test_acc, test_loss = evaluate(test_x, test_y, resnet, sess)
             print("test error - ", 1 - test_acc)
-            print("train loss - ", train_loss)
-            epoch +=1
+            print("test loss - ", test_loss)
+            epoch += 1
 
 
-if __name__== "__main__":
+if __name__ == "__main__":
     main()
