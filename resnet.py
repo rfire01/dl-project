@@ -5,12 +5,9 @@ import pickle
 import tensorflow as tf
 
 
-def conv(x, filter_shape, stride, index):
-    regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
-    layer_name = "conv_{}".format(index)
-    filters = tf.get_variable(name=layer_name, shape=filter_shape,
-                              initializer=tf.contrib.layers.xavier_initializer(),
-                              regularizer=regularize)
+def conv(x, filter_shape, stride):
+    filters = tf.Variable(tf.truncated_normal(filter_shape,
+                                              mean=0.0, stddev=1.0))
     return tf.nn.conv2d(x, filter=filters, strides=[1, stride, stride, 1],
                         padding="SAME")
 
@@ -26,18 +23,17 @@ def normalize_batch(x):
     return batch_norm
 
 
-def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable,
-             index):
+def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
     prev_norm = normalize_batch(x)
     prev_out = tf.nn.relu(prev_norm)
 
     conv_1 = conv(prev_out, [filter_size, filter_size, in_dimension,
-                             out_dimension], stride, index="{}_1".format(index))
+                             out_dimension], stride)
     norm_1 = normalize_batch(conv_1)
     layer_1 = tf.nn.relu(norm_1)
 
     conv_2 = conv(layer_1, [filter_size, filter_size, out_dimension,
-                            out_dimension], 1, index="{}_2".format(index))
+                            out_dimension], 1)
 
     if in_dimension != out_dimension:
         size_reduction = tf.nn.avg_pool(x, ksize=[1, 2, 2, 1],
@@ -72,31 +68,31 @@ class cifar_resnet:
         self.images = tf.placeholder(tf.float32, [None, 32, 32, 3])
         self.labels = tf.placeholder(tf.float32, [None, 10])
 
-        level1 = conv(self.images, [3, 3, 3, 16], 1, index="input")
+        level1 = conv(self.images, [3, 3, 3, 16], 1)
 
         index = 1
 
         for _ in range(n):
             level1 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                              self.LAYER1_DIMENSION, 1, enable, index)
+                              self.LAYER1_DIMENSION, 1, enable)
             index += 1
 
         level2 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                          self.LAYER2_DIMENSION, 2, enable, index)
+                          self.LAYER2_DIMENSION, 2, enable)
         index += 1
 
         for _ in range(n - 1):
             level2 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                              self.LAYER2_DIMENSION, 1, enable, index)
+                              self.LAYER2_DIMENSION, 1, enable)
             index += 1
 
         level3 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                          self.LAYER3_DIMENSION, 2, enable, index)
+                          self.LAYER3_DIMENSION, 2, enable)
         index += 1
 
         for _ in range(n - 1):
             level3 = res_unit(level3, self.FILTER_SIZE, self.LAYER3_DIMENSION,
-                              self.LAYER3_DIMENSION, 1, enable, index)
+                              self.LAYER3_DIMENSION, 1, enable)
             index += 1
 
         normed = normalize_batch(level3)
