@@ -7,7 +7,7 @@ import tensorflow as tf
 
 def conv(x, filter_shape, stride):
     filters = tf.Variable(tf.truncated_normal(filter_shape,
-                                               mean=0.0, stddev=1.0))
+                                              mean=0.0, stddev=1.0))
     return tf.nn.conv2d(x, filter=filters, strides=[1, stride, stride, 1],
                         padding="SAME")
 
@@ -23,7 +23,7 @@ def normalize_batch(x):
     return batch_norm
 
 
-def res_unit(x, filter_size, in_dimension, out_dimension, stride):
+def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
     prev_norm = normalize_batch(x)
     prev_out = tf.nn.relu(prev_norm)
 
@@ -36,7 +36,6 @@ def res_unit(x, filter_size, in_dimension, out_dimension, stride):
                             out_dimension], 1)
 
     if in_dimension != out_dimension:
-        # TODO: check the right way for size reduction
         size_reduction = tf.nn.avg_pool(x, ksize=[1, 2, 2, 1],
                                         strides=[1, 2, 2, 1], padding='VALID')
         pad = (out_dimension - in_dimension) // 2
@@ -45,7 +44,11 @@ def res_unit(x, filter_size, in_dimension, out_dimension, stride):
     else:
         x_padded = x
 
-    return tf.add(conv_2, x_padded)
+    if enable:
+        return tf.add(conv_2, x_padded)
+
+    else:
+        return conv_2
 
 
 class cifar_resnet:
@@ -53,47 +56,66 @@ class cifar_resnet:
     LAYER1_DIMENSION = 16
     LAYER2_DIMENSION = 32
     LAYER3_DIMENSION = 64
+    CHECKPOINTS = [20000, 48000]
+    CHECKPOINT_LEARNING_RATE = [0.01, 0.001, 0.0001]
 
-    def __init__(self, n):
+    def __init__(self, n, enable=True):
+        self.step = tf.Variable(initial_value=0, trainable=False)
+        self.learning_rate = tf.train.piecewise_constant(self.step,
+                                                         self.CHECKPOINTS,
+                                                         self.CHECKPOINT_LEARNING_RATE)
 
         self.images = tf.placeholder(tf.float32, [None, 32, 32, 3])
         self.labels = tf.placeholder(tf.float32, [None, 10])
 
         level1 = conv(self.images, [3, 3, 3, 16], 1)
 
+        index = 1
+
         for _ in range(n):
             level1 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                              self.LAYER1_DIMENSION, 1)
+                              self.LAYER1_DIMENSION, 1, enable)
+            index += 1
 
         level2 = res_unit(level1, self.FILTER_SIZE, self.LAYER1_DIMENSION,
-                          self.LAYER2_DIMENSION, 2)
+                          self.LAYER2_DIMENSION, 2, enable)
+        index += 1
 
         for _ in range(n - 1):
             level2 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                              self.LAYER2_DIMENSION, 1)
+                              self.LAYER2_DIMENSION, 1, enable)
+            index += 1
 
         level3 = res_unit(level2, self.FILTER_SIZE, self.LAYER2_DIMENSION,
-                          self.LAYER3_DIMENSION, 2)
+                          self.LAYER3_DIMENSION, 2, enable)
+        index += 1
 
         for _ in range(n - 1):
             level3 = res_unit(level3, self.FILTER_SIZE, self.LAYER3_DIMENSION,
-                              self.LAYER3_DIMENSION, 1)
+                              self.LAYER3_DIMENSION, 1, enable)
+            index += 1
 
         normed = normalize_batch(level3)
         conv_out = tf.nn.relu(normed)
         global_pool = tf.reduce_mean(conv_out, [1, 2])
 
-        fc_w = tf.Variable(tf.truncated_normal([self.LAYER3_DIMENSION, 10],
-                                               mean=0.0, stddev=1.0))
-        b = tf.Variable(tf.zeros([10]))
+        w_regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
+        with tf.variable_scope("w_out", reuse=tf.AUTO_REUSE):
+          fc_w = tf.get_variable(name="w_out", shape=[self.LAYER3_DIMENSION, 10],
+                                 initializer=tf.uniform_unit_scaling_initializer(factor=1.0),
+                                 regularizer=w_regularize)
+
+        with tf.variable_scope("b_out", reuse=tf.AUTO_REUSE):
+          b_regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
+          b = tf.get_variable(name="b_out", shape=[10],
+                              initializer=tf.zeros_initializer(),
+                              regularizer=b_regularize)
         self.output = tf.nn.softmax(tf.matmul(global_pool, fc_w) + b)
 
-        with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
-            learning_rate = tf.get_variable(name='learning_rate', shape=())
-
-            loss = - tf.reduce_sum(self.labels * tf.log(self.output))
-            optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
-            self.train_optimizer = optimizer.minimize(loss)
+        self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
+        optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9)
+        self.train_optimizer = optimizer.minimize(self.loss,
+                                                  global_step=self.step)
 
 
 def label_to_onehot(labels):
@@ -135,10 +157,11 @@ def input_augmation(images, pad=4):
     return augmated_images
 
 
-def calculate_accuracy(x, y, net, session):
-    max_size = 10000
+def evaluate(x, y, net, session):
+    max_size = 100
 
     total_acc = 0
+    total_loss = 0
     split_amount = len(x) / max_size
     for index in range(int(split_amount)):
         batch_x = x[max_size * index: max_size * (index + 1)]
@@ -154,7 +177,10 @@ def calculate_accuracy(x, y, net, session):
 
         total_acc += 1.0 * correct_num / max_size
 
-    return total_acc / split_amount
+        total_loss += session.run(net.loss, {net.images: batch_x,
+                                      net.labels: batch_y})
+
+    return total_acc / split_amount, total_loss
 
 
 def main():
@@ -172,32 +198,16 @@ def main():
     train_x = train_x[shuffled_indices]
     train_y = train_y[shuffled_indices]
 
-    resnet = cifar_resnet(3)
+    resnet = cifar_resnet(5, False)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
 
     batch_counter = 0
     epoch = 1
-
-    with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
-        tf.get_variable(name='learning_rate', dtype=tf.float32, initializer=tf.constant(0.1))
-        sess.run(tf.global_variables_initializer())
-
     # running 64k iteration, a batch at each iteration.
     for iteration in range(ITERATION_AMOUNT):
-
-        # after 32k iterations decay the learning rate by dividing by 10
-        # TODO - change from 30 to 32k (30 is for testing)
-        if iteration == 30:
-            with tf.variable_scope("learning_rate", reuse=tf.AUTO_REUSE):
-                rate = tf.get_variable('learning_rate', shape=())
-                new_rate = rate / 10
-                print('setting new learning rate from ', rate, " to ", new_rate)
-                assignment = rate.assign(new_rate)
-                sess.run(assignment)
-
-        if iteration % 10 == 0:
+        if iteration % 100 == 0:
             print("iteration ", iteration)
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
         batch_x = input_augmation(batch_x)
@@ -211,10 +221,11 @@ def main():
             batch_counter = 0
 
             print("epoch ", epoch)
-            test_acc = calculate_accuracy(test_x, test_y, resnet, sess)
+            test_acc, test_loss = evaluate(test_x, test_y, resnet, sess)
             print("test error - ", 1 - test_acc)
-            epoch +=1
+            print("test loss - ", test_loss)
+            epoch += 1
 
 
-if __name__== "__main__":
+if __name__ == "__main__":
     main()
