@@ -1,3 +1,4 @@
+"""Implemention of residual network."""
 import os
 import cv2
 import numpy
@@ -6,6 +7,17 @@ import tensorflow as tf
 
 
 def conv(x, filter_shape, stride):
+    """Activate convolution on x
+
+    Args:
+        x (tf.tensor): the input for the convolution.
+        filter_shape (list): the shape of the filter [dim1, dim2, in_dimension,
+            out_dimension]
+        stride (number): the stride to use for the filter.
+
+    Returns:
+        tf.tensor. output of the convolution.
+    """
     filters = tf.Variable(tf.truncated_normal(filter_shape,
                                               mean=0.0, stddev=1.0))
     return tf.nn.conv2d(x, filter=filters, strides=[1, stride, stride, 1],
@@ -13,7 +25,14 @@ def conv(x, filter_shape, stride):
 
 
 def normalize_batch(x):
-    """Batch normalization for a 4-D tensor"""
+    """Batch normalization for a 4-D tensor
+
+    Args:
+        x (tf.tensor): the input for the convolution.
+
+    Returns:
+        tf.tensor. the result of batch normalization.
+    """
     mean, var = tf.nn.moments(x, axes=[0, 1, 2])
     constant_size = x.get_shape().as_list()[3]
     offset = tf.Variable(tf.zeros([constant_size]))
@@ -24,6 +43,19 @@ def normalize_batch(x):
 
 
 def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
+    """Create a residual unit of 2 layers.
+
+    Args:
+        x (tf.tensor): the input for the convolution.
+        filter_size (number): the size of a square (n x n) filter.
+        in_dimension (number): number of channels of x.
+        out_dimension (number): number of channels of the residual unit.
+        stride (number): the stride to use for the filter.
+        enable (bool): create residual unit or regular 2 layers.
+
+    Returns:
+        tf.tensor. output of the residual unit.
+    """
     prev_norm = normalize_batch(x)
     prev_out = tf.nn.relu(prev_norm)
 
@@ -51,7 +83,22 @@ def res_unit(x, filter_size, in_dimension, out_dimension, stride, enable):
         return conv_2
 
 
-class cifar_resnet:
+class cifar_resnet(object):
+    """Residual network for the CIFAR-10 database.
+
+    Attributes:
+        FILTER_SIZE (number):  the size of the filters between layers.
+        LAYER1_DIMENSION (number): number of channels for first part of the
+            network.
+        LAYER2_DIMENSION (number): number of channels for second part of the
+            network.
+        LAYER3_DIMENSION (number): number of channels for third part of the
+            network.
+        CHECKPOINTS (list): at what iterations the network change the
+            learning rate.
+        CHECKPOINT_LEARNING_RATE (list): the learning rate values for each
+            of the checkpoints.
+    """
     FILTER_SIZE = 3
     LAYER1_DIMENSION = 16
     LAYER2_DIMENSION = 32
@@ -99,6 +146,7 @@ class cifar_resnet:
         conv_out = tf.nn.relu(normed)
         global_pool = tf.reduce_mean(conv_out, [1, 2])
 
+        # Adding weight decay to the output layer
         w_regularize = tf.contrib.layers.l2_regularizer(scale=0.0001)
         fc_w = tf.get_variable(name="w_out", shape=[self.LAYER3_DIMENSION, 10],
                                initializer=tf.uniform_unit_scaling_initializer(factor=1.0),
@@ -117,6 +165,14 @@ class cifar_resnet:
 
 
 def label_to_onehot(labels):
+    """Conver labels to one-hot vector.
+
+    Args:
+        labels (numpy.array): array of labels for cifar-10 database.
+
+    Returns:
+        numpy.array. original labels converted to one-hot vector.
+    """
     CLASS_NUM = 10
 
     onehot_labels = []
@@ -128,7 +184,16 @@ def label_to_onehot(labels):
     return numpy.array(onehot_labels)
 
 
-def input_augmation(images, pad=4):
+def input_augmentation(images, pad=4):
+    """Augmentation of images.
+
+    Args:
+        images (numpy.array): the original images.
+        pad (number): how much pad add to the image before the augmentation.
+
+    Return:
+        numpy.array. the images after augmentation.
+    """
     IMAGE_SIZE = 32
 
     pad_width = ((0, 0), (pad, pad), (pad, pad), (0, 0))
@@ -156,6 +221,18 @@ def input_augmation(images, pad=4):
 
 
 def evaluate(x, y, net, session):
+    """Evaluate the network.
+
+    Args:
+        x (numpy.array): input images.
+        y (numpy.array): correct labels for x.
+        net (cifar_resnet): the network to evaluate.
+        session (tf.session): session to use for evaluation.
+
+    Returns:
+         (number, number). the accuracy and loss of the network using x as
+            input and y as correct ouput.
+    """
     max_size = 100
 
     total_acc = 0
@@ -185,9 +262,11 @@ def main():
     ITERATION_AMOUNT = 64000
     CIFAR_BATCH_SIZE = 128
 
+    # download the cifar-10 data.
     (train_x, train_y), \
     (test_x, test_y) = tf.keras.datasets.cifar10.load_data()
 
+    # convert output labels to one-hot vectors.
     train_y = label_to_onehot(train_y)
     test_y = label_to_onehot(test_y)
 
@@ -208,13 +287,14 @@ def main():
         if iteration % 100 == 0:
             print("iteration ", iteration)
         batch_x = train_x[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
-        batch_x = input_augmation(batch_x)
+        batch_x = input_augmentation(batch_x)
         batch_y = train_y[batch_counter: batch_counter + CIFAR_BATCH_SIZE]
 
         sess.run(resnet.train_optimizer,
                  {resnet.images: batch_x, resnet.labels: batch_y})
 
         batch_counter += CIFAR_BATCH_SIZE
+        # evaluate the network after each epoch ends.
         if batch_counter >= len(train_x):
             batch_counter = 0
 
